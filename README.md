@@ -25,6 +25,77 @@ In the output, you'll find options to open the app in a
 
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
+## Home dashboard
+
+The signed-in home screen provides test search, booking, results, order history,
+and support shortcuts, with live recommended tests and health packages. Its
+light-blue, lilac, peach, and deep-violet shortcut cards adapt to light and dark
+mode. Pull down to refresh the catalog; test names and prices come from the API,
+not from the design preview. The signed-out screen retains its sign-in and
+registration actions.
+
+## Splash screen and cold start
+
+`assets/images/splash_screen.jpeg` is the launch artwork. It is configured in
+`app.json` through the `expo-splash-screen` plugin (`resizeMode: "cover"`, navy
+`#03182E` background, same art in dark mode) and the native projects are kept in
+sync:
+
+- iOS: `ios/mypyramids/SplashScreen.storyboard` pins the image edge-to-edge with
+  `scaleAspectFill`, and `SplashScreenLogo.imageset` holds 1x/2x/3x exports.
+- Android 12+ only supports an icon-based system splash, so
+  `drawable-*/splashscreen_logo.png` uses the wordmark cropped from the same
+  artwork over the matching `splashscreen_background` color.
+
+Native splash changes require rebuilding the dev client (`npm run ios` or
+`npm run android`; run `cd ios && pod install` first if pods changed).
+
+Cold-start work was moved off the critical path: the native splash is held with
+`SplashScreen.preventAutoHideAsync()` until the persisted session and onboarding
+flag resolve (with a 4 s fallback), and Firebase Auth is imported dynamically
+after the first commit instead of during root module evaluation.
+
+## App name
+
+`app.json` sets `expo.name` to `MyPyramids` (lowercase `expo.slug` is the URL/ID
+form). Android reads it from `android/app/src/main/res/values/strings.xml`
+(`app_name`) and iOS from `CFBundleDisplayName` in
+`ios/mypyramids/Info.plist`. Both native projects are gitignored and rendered by
+`npx expo prebuild` from `app.json`, so change the name there first.
+
+## App icon
+
+The launcher icon is the legacy Pyramids mark (navy `#23557C` field with the
+red/white pyramid), derived from the legacy app's
+`android/app/src/main/res/mipmap-*` artwork:
+
+- `assets/images/icon.png` and `ios/mypyramids/Images.xcassets/AppIcon.appiconset`
+  hold a 1024x1024 opaque icon (iOS icons must not have alpha).
+- Android adaptive icon: `androidIcon.backgroundColor` `#23557C` with
+  `android-icon-foreground.png` (pyramid only, kept inside the 66% safe zone) and
+  `android-icon-monochrome.png` for Android 13 themed icons.
+- `android/app/src/main/res/mipmap-{m,h,xh,xxh,xxxh}dpi/ic_launcher*.png` carries
+  per-density PNGs; `mipmap-anydpi-v26/ic_launcher*.xml` wires background,
+  foreground, and monochrome layers.
+
+Regenerate after replacing artwork by re-exporting the same files at the sizes
+listed in `app.json`; the native folders are gitignored, so `npx expo prebuild`
+recreates them from `app.json`.
+
+## Appearance
+
+Account → Appearance lets users choose **Light**, **Dark**, or **System**
+(follows the device). The choice is saved to AsyncStorage and applied app-wide
+through the shared `useColorScheme` hook, React Navigation, React Native Paper,
+and the status/navigation bars. The account screen also shows the profile
+summary, account shortcuts, support links, and sign-out.
+
+Onboarding and auth screens (login, sign up, category, provider role, profile,
+phone verification) follow the same resolution via `hooks/use-auth-theme.ts`,
+which provides glassy surfaces over the photo background plus themed inputs,
+dividers, and buttons. The dark navy wordmark sits on a light plate in dark mode
+so the logo stays legible.
+
 ## Get a fresh project
 
 When you're ready, run:
