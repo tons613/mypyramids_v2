@@ -3,7 +3,7 @@ name: Build & Distribute to Firebase
 on:
   push:
     branches: [main]
-  workflow_dispatch: # allows manual trigger too
+  workflow_dispatch:
 
 jobs:
   build-and-distribute:
@@ -20,17 +20,15 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Setup Expo and EAS
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Android (preview profile)
-        id: build
+      - name: Setup EAS
+        run: npm install -g eas-cli
+
+      - name: Build Android (preview)
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           eas build \
             --platform android \
@@ -39,43 +37,43 @@ jobs:
             --no-wait \
             --json > build-output.json
 
-          # Extract the build ID
           BUILD_ID=$(jq -r '.[0].id' build-output.json)
           echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
-          echo "Build ID: $BUILD_ID"
+          echo "Started build: $BUILD_ID"
 
-      - name: Wait for build to finish & download APK
+      - name: Wait for build and download APK
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          echo "Waiting for build $BUILD_ID to complete..."
-          eas build:view $BUILD_ID --json > build-status.json
+          echo "Waiting for build $BUILD_ID..."
 
-          # Simple polling until finished
           while true; do
-            STATUS=$(jq -r '.status' build-status.json)
-            echo "Current status: $STATUS"
+            eas build:view $BUILD_ID --json > status.json
+            STATUS=$(jq -r '.status' status.json)
+            echo "Status: $STATUS"
 
             if [ "$STATUS" = "finished" ]; then
               break
             elif [ "$STATUS" = "errored" ] || [ "$STATUS" = "canceled" ]; then
-              echo "Build failed with status: $STATUS"
+              echo "Build failed"
+              cat status.json
               exit 1
             fi
 
             sleep 30
-            eas build:view $BUILD_ID --json > build-status.json
           done
 
-          # Download the APK
+          # Download the artifact
           eas build:download $BUILD_ID --output ./app-release.apk
-          echo "APK downloaded successfully"
+          ls -lh app-release.apk
 
       - name: Upload to Firebase App Distribution
         uses: wzieba/Firebase-Distribution-Github-Action@v1
         with:
           appId: ${{ secrets.FIREBASE_ANDROID_APP_ID }}
           serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          groups: testers          # ← change to your group name
+          groups: testers
           file: app-release.apk
           releaseNotes: |
-            Build from commit ${{ github.sha }}
+            Automated build from ${{ github.sha }}
             Branch: ${{ github.ref_name }}
