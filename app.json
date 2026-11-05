@@ -10,10 +10,13 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.ios.mypyramids",
-      "buildNumber": "1"
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
-      "package": "com.mypyramids",
+      "package": "com.android.mypyramids",
       "versionCode": 1,
       "allowBackup": false,
       "adaptiveIcon": {
@@ -58,6 +61,20 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "expo-navigation-bar": {
+        "enforceContrast": false,
+        "style": "light"
+      },
+      "eas": {
+        "projectId": "75ca30c2-a6cb-4260-a2fc-1c3aac113405"
+      }
     }
   }
 }

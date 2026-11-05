@@ -1,0 +1,81 @@
+name: Build & Distribute to Firebase
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # allows manual trigger too
+
+jobs:
+  build-and-distribute:
+    name: Build Android & Upload to Firebase
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Android (preview profile)
+        id: build
+        run: |
+          eas build \
+            --platform android \
+            --profile preview \
+            --non-interactive \
+            --no-wait \
+            --json > build-output.json
+
+          # Extract the build ID
+          BUILD_ID=$(jq -r '.[0].id' build-output.json)
+          echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
+          echo "Build ID: $BUILD_ID"
+
+      - name: Wait for build to finish & download APK
+        run: |
+          echo "Waiting for build $BUILD_ID to complete..."
+          eas build:view $BUILD_ID --json > build-status.json
+
+          # Simple polling until finished
+          while true; do
+            STATUS=$(jq -r '.status' build-status.json)
+            echo "Current status: $STATUS"
+
+            if [ "$STATUS" = "finished" ]; then
+              break
+            elif [ "$STATUS" = "errored" ] || [ "$STATUS" = "canceled" ]; then
+              echo "Build failed with status: $STATUS"
+              exit 1
+            fi
+
+            sleep 30
+            eas build:view $BUILD_ID --json > build-status.json
+          done
+
+          # Download the APK
+          eas build:download $BUILD_ID --output ./app-release.apk
+          echo "APK downloaded successfully"
+
+      - name: Upload to Firebase App Distribution
+        uses: wzieba/Firebase-Distribution-Github-Action@v1
+        with:
+          appId: ${{ secrets.FIREBASE_ANDROID_APP_ID }}
+          serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          groups: testers          # ← change to your group name
+          file: app-release.apk
+          releaseNotes: |
+            Build from commit ${{ github.sha }}
+            Branch: ${{ github.ref_name }}
