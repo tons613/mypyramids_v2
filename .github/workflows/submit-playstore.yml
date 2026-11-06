@@ -1,0 +1,83 @@
+name: Submit to Play Store (Internal Testing)
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  submit:
+    name: Build & Submit to Internal Testing
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install EAS CLI
+        run: npm install -g eas-cli
+
+      - name: Create Google Service Account file
+        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT }}' > google-service-account.json
+
+      - name: Extract release notes from PR
+        run: |
+          NOTES="${{ github.event.pull_request.body }}"
+          if [ -z "$NOTES" ]; then
+            NOTES="${{ github.event.pull_request.title }}"
+          fi
+          echo "$NOTES" > release-notes.txt
+          cat release-notes.txt
+
+      - name: Build production
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          eas build \
+            --platform android \
+            --profile production \
+            --non-interactive \
+            --no-wait \
+            --json > build.json
+
+          BUILD_ID=$(jq -r '.[0].id' build.json)
+          echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
+
+      - name: Wait for build
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          while true; do
+            eas build:view $BUILD_ID --json > status.json
+            STATUS=$(jq -r '.status' status.json)
+            echo "Status: $STATUS"
+
+            if [ "$STATUS" = "finished" ]; then
+              break
+            elif [ "$STATUS" = "errored" ] || [ "$STATUS" = "canceled" ]; then
+              exit 1
+            fi
+            sleep 30
+          done
+
+      - name: Submit to Internal Testing track
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          eas submit \
+            --platform android \
+            --profile production \
+            --latest \
+            --non-interactive \
+            --track internal \
+            --changes release-notes.txt

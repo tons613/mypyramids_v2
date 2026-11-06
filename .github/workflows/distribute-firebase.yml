@@ -1,20 +1,18 @@
-name: Build & Distribute to Firebase
+name: Distribute to Firebase
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  workflow_dispatch:  # Manual only
 
 jobs:
   build-and-distribute:
-    name: Build Android & Upload to Firebase
+    name: Build & Upload to Firebase
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -23,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Setup EAS
+      - name: Install EAS CLI
         run: npm install -g eas-cli
 
       - name: Build Android (preview)
@@ -35,18 +33,15 @@ jobs:
             --profile preview \
             --non-interactive \
             --no-wait \
-            --json > build-output.json
+            --json > build.json
 
-          BUILD_ID=$(jq -r '.[0].id' build-output.json)
+          BUILD_ID=$(jq -r '.[0].id' build.json)
           echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
-          echo "Started build: $BUILD_ID"
 
-      - name: Wait for build and download APK
+      - name: Wait for build & download APK
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          echo "Waiting for build $BUILD_ID..."
-
           while true; do
             eas build:view $BUILD_ID --json > status.json
             STATUS=$(jq -r '.status' status.json)
@@ -55,25 +50,18 @@ jobs:
             if [ "$STATUS" = "finished" ]; then
               break
             elif [ "$STATUS" = "errored" ] || [ "$STATUS" = "canceled" ]; then
-              echo "Build failed"
-              cat status.json
               exit 1
             fi
-
             sleep 30
           done
 
-          # Download the artifact
           eas build:download $BUILD_ID --output ./app-release.apk
-          ls -lh app-release.apk
 
-      - name: Upload to Firebase App Distribution
+      - name: Upload to Firebase
         uses: wzieba/Firebase-Distribution-Github-Action@v1
         with:
           appId: ${{ secrets.FIREBASE_ANDROID_APP_ID }}
           serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           groups: testers
           file: app-release.apk
-          releaseNotes: |
-            Automated build from ${{ github.sha }}
-            Branch: ${{ github.ref_name }}
+          releaseNotes: "Manual build from GitHub Actions"
