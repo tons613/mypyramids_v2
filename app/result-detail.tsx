@@ -43,6 +43,7 @@ type TestResult = {
   date_uploaded?: string | number | null;
   order_reference?: string | null;
   report_file?: string | null;
+  patient_name?: string | null;
 };
 
 function humanize(value?: string | number) {
@@ -231,7 +232,9 @@ function ResultDetailContent() {
                 </Text>
                 <Text style={[styles.copy, { color: colors.muted }]}>
                   {reportUrl
-                    ? "Your PDF report is ready to view."
+                    ? result.patient_name
+                      ? `PDF report for ${result.patient_name} is ready to view.`
+                      : "Your PDF report is ready to view."
                     : "The report document has not been uploaded yet."}
                 </Text>
               </View>
@@ -261,8 +264,9 @@ function ResultDetailContent() {
           >
             <Ionicons name="medical-outline" size={19} color={colors.primary} />
             <Text style={[styles.note, { color: colors.navy }]}>
-              Your results should be interpreted by a qualified healthcare
-              professional in the context of your symptoms and medical history.
+              {result.patient_name
+                ? `${result.patient_name}’s results should be interpreted by a qualified healthcare professional in the context of their symptoms and medical history.`
+                : "Your results should be interpreted by a qualified healthcare professional in the context of your symptoms and medical history."}
             </Text>
           </View>
 
@@ -272,6 +276,13 @@ function ResultDetailContent() {
               { backgroundColor: colors.card, borderColor: colors.border },
             ]}
           >
+            {result.patient_name ? (
+              <MetaRow
+                label="PATIENT"
+                value={result.patient_name}
+                colors={colors}
+              />
+            ) : null}
             {result.order_reference ? (
               <MetaRow
                 label="ORDER REFERENCE"

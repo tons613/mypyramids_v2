@@ -54,6 +54,11 @@ export const authService = {
 };
 
 export const testService = {
+  getRecommendations: async () => {
+    const response = await api.get("/get_recommendations");
+    return response.data;
+  },
+
   getCategories: async () => {
     const response = await api.get("/testlist/categories");
     return response.data;
@@ -76,7 +81,9 @@ export const testService = {
   },
 
   getTest: async (testId: string | number) => {
-    const response = await api.get(`/testlist/${encodeURIComponent(String(testId))}`);
+    const response = await api.get(
+      `/testlist/${encodeURIComponent(String(testId))}`,
+    );
     return response.data;
   },
 
@@ -93,7 +100,10 @@ export const testService = {
 
 export const orderService = {
   initializeOrder: async (data: {
-    recipient: { type: 'self' } | { type: 'existing'; patient_id: number } | { type: 'new'; patient: Record<string, unknown> };
+    recipient:
+      | { type: "self" }
+      | { type: "existing"; patient_id: number }
+      | { type: "new"; patient: Record<string, unknown> };
     orderInfo: {
       service_type: string;
       clinicalinfo?: string;
@@ -102,10 +112,10 @@ export const orderService = {
       referrer?: number;
       referName?: string;
     };
-    testlist: Array<{ id: number }>;
-    channels?: Array<'card' | 'bank' | 'ussd' | 'bank_transfer'>;
+    testlist: { id: number }[];
+    channels?: ("card" | "bank" | "ussd" | "bank_transfer")[];
   }) => {
-    const response = await api.post('/initialize_order', data);
+    const response = await api.post("/initialize_order", data);
     return response.data;
   },
 
@@ -123,6 +133,13 @@ export const orderService = {
     const response = await api.get(
       `/get_orders_history?page=${page}&size=${size}`,
     );
+    return response.data;
+  },
+
+  getMyPatients: async (cursor: number | string = 1, size = 20) => {
+    const response = await api.get("/get_my_patients", {
+      params: { cursor, size },
+    });
     return response.data;
   },
 

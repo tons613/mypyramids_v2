@@ -27,12 +27,30 @@ You can start developing by editing the files inside the **app** directory. This
 
 ## Home dashboard
 
-The signed-in home screen provides test search, booking, results, order history,
-and support shortcuts, with live recommended tests and health packages. Its
-light-blue, lilac, peach, and deep-violet shortcut cards adapt to light and dark
-mode. Pull down to refresh the catalog; test names and prices come from the API,
-not from the design preview. The signed-out screen retains its sign-in and
-registration actions.
+The signed-in home screen prioritizes search and compact booking, results, and
+order-history shortcuts. Providers see My Patient beside Order a test in the
+first row. Patients see a Health assistant card beside Order a test, with an AI
+badge and guidance on symptoms and tests. Results and order history fill the
+second row. Providers retain a separate assistant link above News & updates,
+which is the last section for both roles.
+Cards adapt to light/dark mode and stack on narrow screens or with large text.
+
+Recommendations load from `/get_recommendations` and auto-scroll while Home is
+active, looping back after the last card. Swiping remains available and pauses
+auto-scrolling briefly; reduced-motion settings disable auto-scrolling.
+Each card's View details action opens the selected test's details.
+Health packages load from `/healthpackages` in a vertically scrollable list
+capped at three visible rows (with row heights adapting to text size). Tapping
+a package opens its description, price, image, and included tests; included tests
+link to their own details. Add to cart saves the package at its package price,
+with a separate package ID so it cannot collide with an individual test.
+Package payment remains unavailable because `/initialize_order` currently accepts
+test IDs only; the detail page explains this limitation.
+Pull down to refresh the catalog; test names and prices come from the API.
+
+The purple booking hero lives on guest Home, with a Browse tests action alongside
+sign-in and registration options. Guest Home scrolls on smaller displays so
+these actions remain accessible.
 
 ## Splash screen and cold start
 

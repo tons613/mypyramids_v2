@@ -119,7 +119,7 @@ function SessionGate() {
       if (destination === '/(tabs)') {
         // Signed-in users can continue into protected flows outside the tab
         // navigator, such as category browsing, cart, checkout, and support.
-        if (['order', 'support', 'news', 'chat', 'wallet', 'result-detail', 'pdf-viewer'].includes(root)) return;
+        if (['order', 'provider', 'support', 'news', 'chat', 'wallet', 'result-detail', 'pdf-viewer'].includes(root)) return;
         if (root !== '(tabs)') router.replace('/(tabs)');
         return;
       }

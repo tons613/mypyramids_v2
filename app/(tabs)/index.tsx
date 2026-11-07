@@ -3,23 +3,26 @@ import { Colors, Gradient } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { getApiErrorMessage } from "@/services/apiResponse";
 import { testService } from "@/services/endpoints";
+import { HealthPackage, readHealthPackages } from "@/services/healthPackages";
 import { RootState } from "@/store";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Image,
   Pressable,
   RefreshControl,
   ScrollView,
-  type ScrollViewInstance,
   StyleSheet,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { Avatar, Badge, Text } from "react-native-paper";
+import { useReducedMotion } from "react-native-reanimated";
 import {
   SafeAreaView,
   useSafeAreaInsets,
@@ -28,6 +31,10 @@ import { useSelector } from "react-redux";
 
 type CatalogItem = Record<string, any>;
 type ThemeColors = typeof Colors.light | typeof Colors.dark;
+const RECOMMENDATION_WIDTH = 194;
+const RECOMMENDATION_GAP = 12;
+const PACKAGE_ROW_HEIGHT = 92;
+const PACKAGE_ROW_GAP = 10;
 
 function getDisplayText(value: unknown, fallback: string): string {
   if (typeof value === "string" || typeof value === "number")
@@ -98,6 +105,9 @@ export default function HomeScreen() {
     (state: RootState) => state.auth,
   );
   const cartItems = useSelector((state: RootState) => state.cart.items);
+  const isProvider = user?.role?.toLowerCase() === "provider";
+  const { width, fontScale } = useWindowDimensions();
+  const stackCards = width < 360 || fontScale > 1.3;
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
@@ -106,14 +116,53 @@ export default function HomeScreen() {
     navy: colorScheme === "dark" ? theme.text : "#241B40",
   };
   const [recommendedTests, setRecommendedTests] = useState<CatalogItem[]>([]);
-  const [healthPackages, setHealthPackages] = useState<CatalogItem[]>([]);
+  const [healthPackages, setHealthPackages] = useState<HealthPackage[]>([]);
+  const packageScroller = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const packageRowHeight = PACKAGE_ROW_HEIGHT * Math.max(1, fontScale);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [catalogError, setCatalogError] = useState("");
+  const [packageError, setPackageError] = useState("");
   const [timeGreeting, setTimeGreeting] = useState(getTimeGreeting);
-  const recommendationsScrollRef = useRef<ScrollViewInstance>(null);
-  const recommendationIndexRef = useRef(0);
-  const recommendationViewportWidthRef = useRef(0);
+  const recommendationScroller = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const recommendationScroll = useRef({
+    offset: 0,
+    viewport: 0,
+    content: 0,
+    interacting: false,
+    resumeAt: 0,
+  });
+  const reduceMotion = useReducedMotion();
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!isAuthenticated || reduceMotion || recommendedTests.length < 2) return;
+      const interval = setInterval(() => {
+        const scroll = recommendationScroll.current;
+        const maxOffset = Math.max(0, scroll.content - scroll.viewport);
+        if (
+          AppState.currentState !== "active" ||
+          scroll.interacting ||
+          Date.now() < scroll.resumeAt ||
+          scroll.viewport === 0 ||
+          maxOffset === 0
+        ) return;
+        const nextOffset = scroll.offset >= maxOffset - 1
+          ? 0
+          : Math.min(scroll.offset + RECOMMENDATION_WIDTH + RECOMMENDATION_GAP, maxOffset);
+        recommendationScroller.current?.scrollTo({ x: nextOffset, animated: true });
+      }, 4000);
+      return () => clearInterval(interval);
+    }, [isAuthenticated, recommendedTests.length, reduceMotion]),
+  );
+
+  const pauseRecommendations = () => {
+    recommendationScroll.current.interacting = true;
+  };
+  const resumeRecommendations = () => {
+    recommendationScroll.current.interacting = false;
+    recommendationScroll.current.resumeAt = Date.now() + 8000;
+  };
 
   useEffect(() => {
     const interval = setInterval(
@@ -123,33 +172,10 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    recommendationIndexRef.current = 0;
-    if (recommendedTests.length < 2) return;
-
-    const interval = setInterval(() => {
-      const nextIndex =
-        (recommendationIndexRef.current + 1) % recommendedTests.length;
-      recommendationIndexRef.current = nextIndex;
-      const itemStep = 206;
-      const contentWidth = 40 + recommendedTests.length * itemStep;
-      const maxOffset = Math.max(
-        0,
-        contentWidth - recommendationViewportWidthRef.current,
-      );
-      recommendationsScrollRef.current?.scrollTo({
-        x: Math.min(nextIndex * itemStep, maxOffset),
-        animated: true,
-      });
-    }, 4500);
-
-    return () => clearInterval(interval);
-  }, [recommendedTests]);
-
   const loadRecommendations = useCallback(async () => {
     const [testsResult, packagesResult] = await Promise.allSettled([
-      testService.getTests(undefined, 1, 8),
-      testService.getHealthPackages(),
+      testService.getRecommendations(),
+      testService.getHealthPackages().then(readHealthPackages),
     ]);
     let succeeded = false;
     if (testsResult.status === "fulfilled") {
@@ -159,14 +185,11 @@ export default function HomeScreen() {
       succeeded = true;
     }
     if (packagesResult.status === "fulfilled") {
-      setHealthPackages(
-        getList(packagesResult.value, [
-          "items",
-          "packages",
-          "health_packages",
-        ]).slice(0, 6),
-      );
+      setHealthPackages(packagesResult.value);
+      setPackageError("");
       succeeded = true;
+    } else {
+      setPackageError(getApiErrorMessage(packagesResult.reason, "Health packages are unavailable right now."));
     }
 
     if (!succeeded) {
@@ -186,11 +209,11 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated) return;
+    void (async () => {
+      await loadRecommendations();
       setLoadingCatalog(false);
-      return;
-    }
-    void loadRecommendations().finally(() => setLoadingCatalog(false));
+    })();
   }, [isAuthenticated, loadRecommendations]);
 
   const refresh = useCallback(async () => {
@@ -214,39 +237,49 @@ export default function HomeScreen() {
       <SafeAreaView
         style={[styles.guestScreen, { backgroundColor: colors.lavender }]}
       >
-        <Image
-          source={require("@/assets/images/banners/login.jpeg")}
-          style={StyleSheet.absoluteFill}
-          resizeMode="cover"
-        />
-        <View
-          style={[
-            styles.guestTint,
-            {
-              backgroundColor:
-                colorScheme === "dark"
-                  ? "rgba(18,16,26,0.88)"
-                  : "rgba(243,236,255,0.84)",
-            },
-          ]}
-        />
-        <View style={styles.guestContent}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[styles.guestContent, { paddingBottom: Math.max(insets.bottom, 12) + 100 }]}
+        >
           <Image
             source={require("@/assets/images/logo.png")}
             style={styles.guestLogo}
             resizeMode="contain"
           />
-          <Text
-            variant="headlineMedium"
-            style={[styles.guestTitle, { color: colors.navy }]}
+          <LinearGradient
+            colors={["#5326B7", "#7939E8", "#A471EF"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[styles.hero, styles.guestHero, stackCards && styles.stackedHero]}
           >
-            Care that starts with clarity
-          </Text>
+            <View style={styles.heroDecoration} pointerEvents="none" />
+            <View style={styles.heroCopy}>
+              <View style={styles.heroPill}>
+                <Ionicons name="heart-outline" size={15} color="#FFFFFF" />
+                <Text style={styles.heroPillText}>YOUR HEALTH, IN FOCUS</Text>
+              </View>
+              <Text style={styles.heroTitle}>A little clarity.{"\n"}A healthier you.</Text>
+              <Text style={styles.heroSubtitle}>Find the right test. Book with confidence.</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Browse diagnostic tests"
+                onPress={openBooking}
+                style={({ pressed }) => [styles.heroButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.heroButtonText}>Browse tests</Text>
+                <Ionicons name="arrow-forward" size={17} color="#5B21B6" />
+              </Pressable>
+            </View>
+            {!stackCards ? (
+              <View style={styles.heroArtwork} pointerEvents="none"><HomeTestArtwork /></View>
+            ) : null}
+          </LinearGradient>
           <Text style={[styles.guestSubtitle, { color: colors.muted }]}>
             Book diagnostic tests, follow your orders, and find your results in
             one place.
           </Text>
           <Pressable
+            accessibilityRole="button"
             onPress={() => router.push("/auth/login")}
             style={styles.guestButtonWrap}
           >
@@ -261,6 +294,7 @@ export default function HomeScreen() {
             </LinearGradient>
           </Pressable>
           <Pressable
+            accessibilityRole="button"
             onPress={() => router.push("/auth/category")}
             style={styles.guestRegister}
           >
@@ -269,7 +303,7 @@ export default function HomeScreen() {
               Create account
             </Text>
           </Pressable>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -354,6 +388,7 @@ export default function HomeScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Open account"
                 onPress={() => router.push("/(tabs)/account")}
+                style={styles.accountButton}
               >
                 <Avatar.Text
                   size={34}
@@ -382,7 +417,7 @@ export default function HomeScreen() {
               variant="bodyMedium"
               style={[styles.greetingSubtitle, { color: colors.muted }]}
             >
-              Let’s take care of you today.
+              {isProvider ? "Your patients and their care, in one place." : "Your tests, orders and results, in one place."}
             </Text>
           </View>
         </View>
@@ -401,50 +436,7 @@ export default function HomeScreen() {
           <Text style={[styles.searchPlaceholder, { color: colors.muted }]}>
             Search tests or health packages
           </Text>
-          <View
-            style={[styles.searchFilter, { backgroundColor: colors.accent }]}
-          >
-            <Ionicons name="options-outline" size={20} color={colors.primary} />
-          </View>
         </Pressable>
-
-        <View style={styles.heroWrap}>
-          <LinearGradient
-            colors={["#5326B7", "#7939E8", "#A471EF"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.hero}
-          >
-            <View style={styles.heroDecoration} />
-            <View style={styles.heroCopy}>
-              <View style={styles.heroPill}>
-                <Ionicons name="heart-outline" size={13} color="#FFFFFF" />
-                <Text style={styles.heroPillText}>YOUR HEALTH, IN FOCUS</Text>
-              </View>
-              <Text style={styles.heroTitle}>
-                A little clarity.{"\n"}A healthier you.
-              </Text>
-              <Text style={styles.heroSubtitle}>
-                Find the right test.{"\n"}Book with confidence.
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Book a test"
-                onPress={openBooking}
-                style={({ pressed }) => [
-                  styles.heroButton,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text style={styles.heroButtonText}>Book a test</Text>
-                <Ionicons name="arrow-forward" size={17} color="#5B21B6" />
-              </Pressable>
-            </View>
-            <View style={styles.heroArtwork} pointerEvents="none">
-              <HomeTestArtwork />
-            </View>
-          </LinearGradient>
-        </View>
 
         <View style={styles.section}>
           <View style={styles.sectionHeading}>
@@ -455,7 +447,7 @@ export default function HomeScreen() {
             </View>
           </View>
           <View style={styles.actionGrid}>
-            <View style={styles.actionRow}>
+            <View style={[styles.actionRow, stackCards && styles.stackedRow]}>
               <QuickLink
                 icon="flask-outline"
                 title="Order a test"
@@ -464,16 +456,27 @@ export default function HomeScreen() {
                 onPress={openBooking}
                 colors={colors}
               />
-              <QuickLink
-                icon="document-text-outline"
-                title="My test results"
-                subtitle="View your reports"
-                tone="results"
-                onPress={() => router.push("/(tabs)/results")}
-                colors={colors}
-              />
+              {isProvider ? (
+                <QuickLink
+                  icon="people-outline"
+                  title="My Patient"
+                  subtitle="Patient orders and results"
+                  tone="patients"
+                  onPress={() => router.push("/provider/patients")}
+                  colors={colors}
+                />
+              ) : (
+                <QuickLink
+                  icon="chatbubbles-outline"
+                  title="Health assistant"
+                  subtitle="Ask about symptoms and tests"
+                  tone="assistant"
+                  onPress={() => router.push("/chat")}
+                  colors={colors}
+                />
+              )}
             </View>
-            <View style={styles.actionRow}>
+            <View style={[styles.actionRow, stackCards && styles.stackedRow]}>
               <QuickLink
                 icon="time-outline"
                 title="Order history"
@@ -483,11 +486,11 @@ export default function HomeScreen() {
                 colors={colors}
               />
               <QuickLink
-                icon="headset-outline"
-                title="Need a hand?"
-                subtitle="We’re here to help"
-                tone="support"
-                onPress={() => router.push("/chat")}
+                icon="document-text-outline"
+                title="My test results"
+                subtitle={isProvider ? "Your personal reports" : "View your reports"}
+                tone="results"
+                onPress={() => router.push("/(tabs)/results")}
                 colors={colors}
               />
             </View>
@@ -497,8 +500,8 @@ export default function HomeScreen() {
         <View style={styles.section}>
           <SectionHeader
             title="Recommended for you"
-            subtitle="Popular tests to help you get started"
-            action="See all"
+            subtitle="Suggestions selected for you"
+            action="Browse tests"
             onAction={openBooking}
             colors={colors}
           />
@@ -511,19 +514,25 @@ export default function HomeScreen() {
             </View>
           ) : recommendedTests.length ? (
             <ScrollView
-              ref={recommendationsScrollRef}
+              ref={recommendationScroller}
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.horizontalContent}
               onLayout={(event) => {
-                recommendationViewportWidthRef.current =
-                  event.nativeEvent.layout.width;
+                recommendationScroll.current.viewport = event.nativeEvent.layout.width;
               }}
-              onMomentumScrollEnd={(event) => {
-                recommendationIndexRef.current = Math.round(
-                  event.nativeEvent.contentOffset.x / 206,
-                );
+              onContentSizeChange={(contentWidth) => {
+                recommendationScroll.current.content = contentWidth;
               }}
+              onScroll={(event) => {
+                recommendationScroll.current.offset = event.nativeEvent.contentOffset.x;
+              }}
+              scrollEventThrottle={16}
+              onTouchStart={pauseRecommendations}
+              onTouchEnd={resumeRecommendations}
+              onTouchCancel={resumeRecommendations}
+              onScrollBeginDrag={pauseRecommendations}
+              onScrollEndDrag={resumeRecommendations}
             >
               {recommendedTests.map((item, index) => {
                 const name = getDisplayText(
@@ -538,9 +547,19 @@ export default function HomeScreen() {
                 return (
                   <Pressable
                     key={String(id)}
-                    onPress={openBooking}
+                    onPress={() => {
+                      const testId = item.id ?? item.test_id;
+                      if (
+                        (typeof testId !== "number" && typeof testId !== "string") ||
+                        (typeof testId === "string" && !testId.trim())
+                      ) {
+                        Alert.alert("Test unavailable", "This recommendation is missing its test ID. Please browse the test catalog.");
+                        return;
+                      }
+                      router.push({ pathname: "/order/test-detail", params: { testId: String(testId) } });
+                    }}
                     accessibilityRole="button"
-                    accessibilityLabel={`Book ${name}`}
+                    accessibilityLabel={`View ${name} details`}
                     style={({ pressed }) => [
                       styles.recommendationCard,
                       pressed && styles.pressed,
@@ -604,6 +623,9 @@ export default function HomeScreen() {
                             { backgroundColor: colors.accent },
                           ]}
                         >
+                          <Text style={[styles.recommendationCtaText, { color: colors.primary }]}>
+                            View details
+                          </Text>
                           <Ionicons
                             name="arrow-forward"
                             size={15}
@@ -631,91 +653,30 @@ export default function HomeScreen() {
           <SectionHeader
             title="Health packages"
             subtitle="Thoughtful checkups, grouped for you"
-            action="Browse"
-            onAction={openBooking}
+            action={healthPackages.length > 3 ? "Scroll for more" : undefined}
+            onAction={() => packageScroller.current?.scrollTo({ y: packageRowHeight + PACKAGE_ROW_GAP, animated: true })}
             colors={colors}
           />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Explore health packages"
-            onPress={openBooking}
-            style={({ pressed }) => [
-              styles.packagePromo,
-              {
-                backgroundColor:
-                  colorScheme === "dark" ? colors.card : "#F3EDFF",
-                borderColor: colors.border,
-              },
-              pressed && styles.pressed,
-            ]}
-          >
-            <View
-              style={[
-                styles.packagePromoArt,
-                { backgroundColor: colors.accent },
-              ]}
-            >
-              <Ionicons
-                name="shield-checkmark"
-                size={48}
-                color={colors.primary}
-              />
-            </View>
-            <View style={styles.packagePromoCopy}>
-              <Text
-                style={[styles.packagePromoEyebrow, { color: colors.primary }]}
-              >
-                A MORE COMPLETE PICTURE
-              </Text>
-              <Text style={[styles.packagePromoTitle, { color: colors.navy }]}>
-                Small steps. Better health.
-              </Text>
-              <Text style={[styles.packagePromoBody, { color: colors.muted }]}>
-                Discover checkups that bring the right tests together.
-              </Text>
-              <View style={styles.packagePromoCta}>
-                <Text
-                  style={[
-                    styles.packagePromoCtaText,
-                    { color: colors.primary },
-                  ]}
-                >
-                  Explore packages
-                </Text>
-                <Ionicons
-                  name="arrow-forward"
-                  size={15}
-                  color={colors.primary}
-                />
-              </View>
-            </View>
-          </Pressable>
           {healthPackages.length ? (
-            <View style={styles.packageList}>
-              {healthPackages.slice(0, 3).map((pkg, index) => {
-                const name = getDisplayText(
-                  pkg.name ||
-                    pkg.package_name ||
-                    pkg.healthpackage ||
-                    pkg.title,
-                  "Health package",
-                );
-                const subtitle = getDisplayText(
-                  pkg.includes ||
-                    pkg.description ||
-                    pkg.tests_count ||
-                    pkg.subtitle,
-                  "Explore this package",
-                );
-                const id = pkg.id ?? pkg.package_id ?? `${name}-${index}`;
+            <ScrollView
+              ref={packageScroller}
+              nestedScrollEnabled
+              style={{ height: packageRowHeight * Math.min(3, healthPackages.length) + PACKAGE_ROW_GAP * Math.max(0, Math.min(3, healthPackages.length) - 1) }}
+              contentContainerStyle={styles.packageList}
+              accessibilityLabel="Health packages. Scroll to see more packages"
+            >
+              {healthPackages.map((pkg) => {
+                const name = pkg.name;
+                const subtitle = pkg.subheading || `${pkg.test_count} ${pkg.test_count === 1 ? "test" : "tests"} included`;
                 return (
                   <Pressable
-                    key={String(id)}
-                    onPress={openBooking}
+                    key={String(pkg.id)}
+                    onPress={() => router.push({ pathname: "/order/package-detail", params: { packageId: String(pkg.id) } })}
                     accessibilityRole="button"
                     accessibilityLabel={`Explore ${name}`}
                     style={({ pressed }) => [
                       styles.packageCard,
+                      { height: packageRowHeight },
                       pressed && styles.pressed,
                       {
                         backgroundColor: colors.card,
@@ -756,7 +717,7 @@ export default function HomeScreen() {
                       <Text
                         style={[styles.packagePrice, { color: colors.primary }]}
                       >
-                        {getPrice(pkg.price ?? pkg.amount ?? pkg.package_price)}
+                        {pkg.price === null ? "Price unavailable" : getPrice(pkg.price)}
                       </Text>
                       <View
                         style={[
@@ -774,21 +735,42 @@ export default function HomeScreen() {
                   </Pressable>
                 );
               })}
-            </View>
+            </ScrollView>
           ) : (
             <EmptySection
               message={
                 loadingCatalog
                   ? "Loading packages…"
-                  : catalogError ||
+                  : packageError ||
                     "Health packages will appear here when available."
               }
               colors={colors}
             />
           )}
+          {healthPackages.length > 0 && packageError ? (
+            <Text accessibilityRole="alert" style={[styles.packageError, { color: colors.muted }]}>{packageError}</Text>
+          ) : null}
         </View>
 
-        <View style={[styles.section, styles.lastSection]}>
+        {isProvider ? <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Health assistant. AI guidance on symptoms and tests"
+          onPress={() => router.push("/chat")}
+          style={({ pressed }) => [
+            styles.supportRow,
+            { backgroundColor: colors.card, borderColor: colors.border },
+            pressed && styles.pressed,
+          ]}
+        >
+          <Ionicons name="chatbubbles-outline" size={23} color={colors.primary} />
+          <View style={styles.sectionText}>
+            <Text style={[styles.quickLinkTitle, { color: colors.navy }]}>Health assistant</Text>
+            <Text style={[styles.quickLinkSubtitle, { color: colors.muted }]}>AI guidance on symptoms and tests</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={19} color={colors.primary} />
+        </Pressable> : null}
+
+        <View style={styles.section}>
           <SectionHeader
             title="News & updates"
             action="View all"
@@ -900,7 +882,7 @@ function QuickLink({
   subtitle: string;
   onPress: () => void;
   colors: ThemeColors;
-  tone: "booking" | "results" | "history" | "support";
+  tone: "booking" | "results" | "history" | "patients" | "assistant";
 }) {
   const isDark = useColorScheme() === "dark";
   const palette = {
@@ -919,17 +901,21 @@ function QuickLink({
       border: isDark ? "#51382B" : "#FAE9DC",
       icon: isDark ? "#FDBA74" : "#BC7445",
     },
-    support: {
-      background: isDark ? "#30204D" : "#231747",
-      border: isDark ? "#503575" : "#231747",
-      icon: "#D0B6FF",
+    patients: {
+      background: isDark ? "#18312E" : "#EAF8F4",
+      border: isDark ? "#28514A" : "#D5EEE7",
+      icon: isDark ? "#6EE7B7" : "#18856A",
+    },
+    assistant: {
+      background: isDark ? "#18312E" : "#EAF8F4",
+      border: isDark ? "#28514A" : "#D5EEE7",
+      icon: isDark ? "#6EE7B7" : "#18856A",
     },
   }[tone];
-  const isSupport = tone === "support";
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${title}. ${subtitle}`}
+      accessibilityLabel={`${title}. ${tone === "assistant" ? "AI guidance. " : ""}${subtitle}`}
       onPress={onPress}
       style={({ pressed }) => [
         styles.quickLink,
@@ -941,7 +927,7 @@ function QuickLink({
         style={[
           styles.quickLinkIcon,
           {
-            backgroundColor: isSupport ? "rgba(255,255,255,0.09)" : colors.card,
+            backgroundColor: colors.card,
           },
         ]}
       >
@@ -951,7 +937,7 @@ function QuickLink({
         <Text
           style={[
             styles.quickLinkTitle,
-            { color: isSupport ? "#FFFFFF" : colors.navy },
+            { color: colors.navy },
           ]}
         >
           {title}
@@ -959,22 +945,26 @@ function QuickLink({
         <Text
           style={[
             styles.quickLinkSubtitle,
-            { color: isSupport ? "#C9BCDF" : colors.muted },
+            { color: colors.muted },
           ]}
         >
           {subtitle}
         </Text>
       </View>
-      <View
+      {tone === "assistant" ? (
+        <View style={[styles.assistantBadge, { backgroundColor: colors.card }]}>
+          <Text style={[styles.assistantBadgeText, { color: palette.icon }]}>AI</Text>
+        </View>
+      ) : <View
         style={[
           styles.quickLinkArrow,
           {
-            backgroundColor: isSupport ? "rgba(255,255,255,0.09)" : colors.card,
+            backgroundColor: colors.card,
           },
         ]}
       >
         <Ionicons name="arrow-forward" size={16} color={palette.icon} />
-      </View>
+      </View>}
     </Pressable>
   );
 }
@@ -1006,7 +996,7 @@ const styles = StyleSheet.create({
     flexDirection: "column",
     paddingHorizontal: 24,
     paddingTop: 18,
-    paddingBottom: 22,
+    paddingBottom: 18,
   },
   brandRow: {
     width: "100%",
@@ -1014,7 +1004,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
-  greeting: { marginTop: 24 },
+  greeting: { marginTop: 16 },
   greetingEyebrow: { fontSize: 13, marginBottom: 6 },
   dashboardLogo: { width: 112, height: 42, alignSelf: "flex-start" },
   greetingLine: {
@@ -1036,9 +1026,10 @@ const styles = StyleSheet.create({
     gap: 9,
     marginLeft: 8,
   },
+  accountButton: { minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" },
   headerButton: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
@@ -1055,7 +1046,7 @@ const styles = StyleSheet.create({
   searchBox: {
     minHeight: 52,
     marginHorizontal: 24,
-    marginBottom: 20,
+    marginBottom: 0,
     paddingLeft: 15,
     paddingRight: 10,
     flexDirection: "row",
@@ -1070,20 +1061,8 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   searchPlaceholder: { flex: 1, fontSize: 13, paddingVertical: 12 },
-  searchFilter: {
-    width: 33,
-    height: 33,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  heroWrap: {
-    paddingHorizontal: 24,
-    shadowColor: "#7538D8",
-    shadowOpacity: 0.17,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-  },
+  guestHero: { width: "100%" },
+  stackedHero: { flexDirection: "column", alignItems: "stretch" },
   hero: {
     minHeight: 215,
     borderRadius: 24,
@@ -1112,7 +1091,7 @@ const styles = StyleSheet.create({
   },
   heroPillText: {
     color: "#FFFFFF",
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: "700",
     letterSpacing: 1,
   },
@@ -1127,8 +1106,8 @@ const styles = StyleSheet.create({
   heroSubtitle: {
     maxWidth: 225,
     color: "rgba(255,255,255,0.82)",
-    fontSize: 11,
-    lineHeight: 16,
+    fontSize: 14,
+    lineHeight: 21,
     marginTop: 9,
     marginBottom: 15,
   },
@@ -1143,7 +1122,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     backgroundColor: "#FFFFFF",
   },
-  heroButtonText: { color: "#5B21B6", fontSize: 11, fontWeight: "700" },
+  heroButtonText: { color: "#5B21B6", fontSize: 14, fontWeight: "700" },
   heroArtwork: {
     width: "32%",
     maxWidth: 129,
@@ -1151,7 +1130,6 @@ const styles = StyleSheet.create({
     alignSelf: "flex-end",
   },
   section: { marginTop: 26 },
-  lastSection: { marginBottom: 4 },
   sectionHeading: {
     flexDirection: "row",
     alignItems: "center",
@@ -1161,7 +1139,7 @@ const styles = StyleSheet.create({
   },
   sectionText: { flex: 1 },
   sectionTitle: { fontSize: 18, fontWeight: "700", letterSpacing: -0.4 },
-  sectionSubtitle: { fontSize: 11, marginTop: 6 },
+  sectionSubtitle: { fontSize: 13, marginTop: 6 },
   sectionAction: {
     flexDirection: "row",
     alignItems: "center",
@@ -1170,15 +1148,17 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingLeft: 8,
   },
-  sectionActionText: { fontSize: 11, fontWeight: "700" },
+  sectionActionText: { fontSize: 13, fontWeight: "700" },
   actionGrid: { gap: 12, paddingHorizontal: 24 },
   actionRow: { flexDirection: "row", gap: 12 },
+  stackedRow: { flexDirection: "column" },
+  supportRow: { margin: 24, marginBottom: 4, padding: 16, minHeight: 76, flexDirection: "row", alignItems: "center", gap: 14, borderRadius: 18, borderWidth: 1 },
   quickLink: {
     flex: 1,
     minWidth: 0,
-    minHeight: 154,
+    minHeight: 132,
     padding: 16,
-    paddingBottom: 42,
+    paddingBottom: 16,
     borderRadius: 20,
     borderWidth: 1,
   },
@@ -1189,18 +1169,29 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  quickLinkCopy: { marginTop: 13 },
+  quickLinkCopy: { marginTop: 10 },
+  assistantBadge: {
+    position: "absolute",
+    right: 12,
+    top: 16,
+    minHeight: 26,
+    paddingHorizontal: 8,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  assistantBadgeText: { fontSize: 11, fontWeight: "800" },
   quickLinkTitle: {
     fontSize: 14,
     lineHeight: 19,
     fontWeight: "700",
     letterSpacing: -0.2,
   },
-  quickLinkSubtitle: { fontSize: 11, lineHeight: 16, marginTop: 5 },
+  quickLinkSubtitle: { fontSize: 13, lineHeight: 18, marginTop: 4 },
   quickLinkArrow: {
     position: "absolute",
     right: 12,
-    bottom: 12,
+    top: 16,
     width: 26,
     height: 26,
     borderRadius: 9,
@@ -1209,8 +1200,8 @@ const styles = StyleSheet.create({
   },
   horizontalContent: { paddingHorizontal: 20, paddingBottom: 3 },
   recommendationCard: {
-    width: 194,
-    marginRight: 12,
+    width: RECOMMENDATION_WIDTH,
+    marginRight: RECOMMENDATION_GAP,
     borderRadius: 20,
     borderWidth: 1,
     overflow: "hidden",
@@ -1231,7 +1222,7 @@ const styles = StyleSheet.create({
   categoryTag: {
     flex: 1,
     textAlign: "right",
-    fontSize: 8,
+    fontSize: 11,
     fontWeight: "700",
     letterSpacing: 0.7,
   },
@@ -1249,24 +1240,24 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   recommendationBottom: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 8,
     marginTop: 7,
   },
   recommendationPrice: {
-    flex: 1,
-    marginRight: 6,
     fontSize: 13,
     fontWeight: "700",
   },
   recommendationCta: {
-    width: 26,
-    height: 26,
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
     borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
   },
+  recommendationCtaText: { fontSize: 12, fontWeight: "700" },
   loadingRow: {
     minHeight: 94,
     flexDirection: "row",
@@ -1286,7 +1277,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   emptyText: { flex: 1, fontSize: 12, lineHeight: 17 },
-  packageList: { paddingHorizontal: 24, gap: 10 },
+  packageList: { paddingHorizontal: 24, gap: PACKAGE_ROW_GAP },
+  packageError: { paddingHorizontal: 24, marginTop: 8, fontSize: 13 },
   packageCard: {
     minHeight: 82,
     flexDirection: "row",
@@ -1306,53 +1298,13 @@ const styles = StyleSheet.create({
   },
   packageCopy: { flex: 1 },
   packageName: { fontSize: 13, fontWeight: "800" },
-  packageSubtitle: { fontSize: 11, marginTop: 4 },
+  packageSubtitle: { fontSize: 13, marginTop: 4 },
   packageEnd: { alignItems: "flex-end", gap: 7 },
   packagePrice: { fontSize: 12, fontWeight: "800" },
   packageArrow: {
     width: 27,
     height: 27,
     borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  packagePromo: {
-    minHeight: 134,
-    marginHorizontal: 24,
-    marginBottom: 13,
-    padding: 18,
-    borderRadius: 21,
-    borderWidth: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 15,
-  },
-  packagePromoCopy: { flex: 1 },
-  packagePromoEyebrow: {
-    fontSize: 8,
-    fontWeight: "700",
-    letterSpacing: 0.8,
-    marginBottom: 6,
-  },
-  packagePromoTitle: {
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: "700",
-    marginBottom: 6,
-  },
-  packagePromoCta: {
-    marginTop: 10,
-    alignSelf: "flex-start",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  packagePromoBody: { fontSize: 11, lineHeight: 17 },
-  packagePromoCtaText: { fontSize: 11, fontWeight: "700" },
-  packagePromoArt: {
-    width: 64,
-    height: 70,
-    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1382,22 +1334,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   pressed: { opacity: 0.78, transform: [{ scale: 0.985 }] },
-  guestScreen: { flex: 1, justifyContent: "center" },
-  guestTint: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: "rgba(243,236,255,0.84)",
-  },
-  guestContent: { alignItems: "center", paddingHorizontal: 30 },
-  guestLogo: { width: 230, height: 88, marginBottom: 22 },
-  guestTitle: {
-    textAlign: "center",
-    fontSize: 28,
-    lineHeight: 34,
-    fontWeight: "800",
-  },
+  guestScreen: { flex: 1 },
+  guestContent: { flexGrow: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, paddingTop: 24 },
+  guestLogo: { width: 180, height: 68, marginBottom: 24 },
   guestSubtitle: {
     maxWidth: 300,
-    marginTop: 10,
+    marginTop: 22,
     marginBottom: 26,
     textAlign: "center",
     fontSize: 14,
@@ -1413,6 +1355,6 @@ const styles = StyleSheet.create({
     borderRadius: 28,
   },
   primaryButtonText: { color: "#FFFFFF", fontSize: 16, fontWeight: "800" },
-  guestRegister: { flexDirection: "row", marginTop: 20 },
+  guestRegister: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", minHeight: 44, alignItems: "center", marginTop: 12 },
   linkText: { fontWeight: "800" },
 });

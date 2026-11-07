@@ -23,6 +23,7 @@ type Order = {
   branch_accepted?: string | null;
   clinicalinfo?: string | null;
   referrer?: string | null;
+  patient_name?: string | null;
   order_list?: OrderLine[];
 };
 
@@ -67,6 +68,7 @@ function OrderHistoryDetailContent() {
             <SummaryRow label="Collection charge" value={naira(order.additional_charge)} colors={colors} />
             <View style={[styles.divider, { backgroundColor: colors.border }]} />
             <SummaryRow label="Total paid" value={naira(order.netamount)} colors={colors} strong />
+            {order.patient_name ? <SummaryRow label="Patient" value={order.patient_name} colors={colors} /> : null}
             {order.branch_accepted || order.branch ? <SummaryRow label="Collection centre" value={order.branch_accepted || order.branch || ''} colors={colors} /> : null}
             {order.referrer ? <SummaryRow label="Referred by" value={order.referrer} colors={colors} /> : null}
           </View>
