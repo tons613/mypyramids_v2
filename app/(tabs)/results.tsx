@@ -16,7 +16,10 @@ import {
   View,
 } from "react-native";
 import { Text } from "react-native-paper";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
 type TestResult = {
   id?: string | number;
@@ -33,11 +36,16 @@ type TestResult = {
         category?: { testcategory?: string };
       };
   test_name?: string;
-  test?: { testname?: string; name?: string; category?: { testcategory?: string } };
+  test?: {
+    testname?: string;
+    name?: string;
+    category?: { testcategory?: string };
+  };
   result?: unknown;
   status?: string | number;
   amount?: number | string;
   created_at?: string | number | null;
+  order_created_at?: string | number | null;
   date?: string | number | null;
   date_reported?: string | number | null;
   date_uploaded?: string | number | null;
@@ -46,7 +54,10 @@ type TestResult = {
 };
 
 function normalizeResults(payload: unknown): TestResult[] {
-  const flatten = (entries: unknown[], parent?: Record<string, unknown>): TestResult[] =>
+  const flatten = (
+    entries: unknown[],
+    parent?: Record<string, unknown>,
+  ): TestResult[] =>
     entries.flatMap((entry) => {
       if (!entry || typeof entry !== "object") return [];
       const row = entry as Record<string, unknown>;
@@ -59,15 +70,29 @@ function normalizeResults(payload: unknown): TestResult[] {
         const inherited = {
           ...parent,
           order_reference:
-            row.order_reference ?? row.title ?? parent?.order_reference ??
-            (row.request_id !== undefined ? `Order #${row.request_id}` : undefined),
+            row.order_reference ??
+            row.title ??
+            parent?.order_reference ??
+            (row.request_id !== undefined
+              ? `Order #${row.request_id}`
+              : undefined),
           request_id: row.request_id ?? parent?.request_id,
+          order_created_at: row.created_at ?? parent?.order_created_at,
           date: row.date ?? row.created_at ?? parent?.date,
         };
         return flatten(nested, inherited);
       }
-      const merged = { ...parent, ...row } as TestResult;
-      if (!merged.testname && !merged.test_name && row.test && typeof row.test === "object") {
+      const merged = {
+        ...parent,
+        ...row,
+        order_created_at: parent?.order_created_at ?? parent?.created_at ?? row.order_created_at,
+      } as TestResult;
+      if (
+        !merged.testname &&
+        !merged.test_name &&
+        row.test &&
+        typeof row.test === "object"
+      ) {
         merged.testname = row.test as TestResult["testname"];
       }
       return [merged];
@@ -76,7 +101,8 @@ function normalizeResults(payload: unknown): TestResult[] {
   if (Array.isArray(payload)) return flatten(payload);
   if (!payload || typeof payload !== "object") return [];
   const record = payload as Record<string, unknown>;
-  if (Array.isArray(record.order_list)) return flatten(record.order_list, record);
+  if (Array.isArray(record.order_list))
+    return flatten(record.order_list, record);
   if (Array.isArray(record.items)) return flatten(record.items);
   if (Array.isArray(record.results)) return flatten(record.results);
   if (Array.isArray(record.data)) return flatten(record.data);
@@ -92,7 +118,9 @@ function getTestName(result: TestResult) {
     result.test_name ||
     result.test?.testname ||
     result.test?.name ||
-    (result.test_id !== undefined ? `Test ${result.test_id}` : "Test details unavailable")
+    (result.test_id !== undefined
+      ? `Test ${result.test_id}`
+      : "Test details unavailable")
   );
 }
 
@@ -184,7 +212,11 @@ function ResultsContent() {
       params: {
         result: JSON.stringify(result),
         resultKey: String(
-          result.result_id ?? result.id ?? result._id ?? result.test_id ?? index,
+          result.result_id ??
+            result.id ??
+            result._id ??
+            result.test_id ??
+            index,
         ),
       },
     });

@@ -45,7 +45,6 @@ jobs:
           echo "Waiting for build $BUILD_ID to finish..."
 
           for i in {1..80}; do
-            # Get status and force lowercase
             STATUS=$(eas build:view "$BUILD_ID" --json | jq -r '.status' | tr '[:upper:]' '[:lower:]')
             echo "Attempt $i - Status: $STATUS"
 
@@ -56,7 +55,6 @@ jobs:
 
             if [ "$STATUS" = "errored" ] || [ "$STATUS" = "canceled" ]; then
               echo "❌ Build failed with status: $STATUS"
-              eas build:view "$BUILD_ID"
               exit 1
             fi
 
@@ -68,8 +66,17 @@ jobs:
             exit 1
           fi
 
-          echo "Downloading APK..."
-          eas build:download "$BUILD_ID" --output ./app-release.apk --force
+          echo "Getting download URL..."
+          BUILD_URL=$(eas build:view "$BUILD_ID" --json | jq -r '.artifacts.buildUrl // .artifacts.applicationArchiveUrl // empty')
+
+          if [ -z "$BUILD_URL" ] || [ "$BUILD_URL" = "null" ]; then
+            echo "❌ Could not find build download URL"
+            eas build:view "$BUILD_ID" --json
+            exit 1
+          fi
+
+          echo "Downloading APK from: $BUILD_URL"
+          curl -L "$BUILD_URL" -o app-release.apk
           ls -lh app-release.apk
           echo "✅ APK downloaded successfully"
 

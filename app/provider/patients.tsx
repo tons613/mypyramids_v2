@@ -376,7 +376,7 @@ function ProviderPatientsContent() {
           ...line,
           request_id: order.request_id ?? order.id,
           order_reference: order.order_reference,
-          created_at: order.created_at,
+          order_created_at: order.created_at,
           patient_name: getPatientName(order),
         }),
       },
