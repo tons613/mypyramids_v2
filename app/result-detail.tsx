@@ -5,12 +5,7 @@ import { useColorScheme } from "@/hooks/use-color-scheme";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useMemo } from "react";
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View,
-} from "react-native";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -38,6 +33,7 @@ type TestResult = {
   result?: unknown;
   status?: string | number;
   created_at?: string | number | null;
+  order_created_at?: string | number | null;
   date?: string | number | null;
   date_reported?: string | number | null;
   date_uploaded?: string | number | null;
@@ -197,14 +193,18 @@ function ResultDetailContent() {
               <Text style={styles.heroCategory}>{category}</Text>
             ) : null}
             <Text style={styles.heroDate}>
-              Reported{" "}
-              {formatDate(
-                result.date_reported ??
-                  result.date_uploaded ??
-                  result.created_at ??
-                  result.date,
-              )}
+              Order date:{" "}
+              {formatDate(result.order_created_at)}
             </Text>
+            {result.date_reported || result.date_uploaded ? (
+              <Text style={styles.heroDate}>
+                Reported{" "}
+                {formatDate(
+                  result.date_reported ??
+                    result.date_uploaded
+                )}
+              </Text>
+            ) : null}
           </View>
 
           <View
@@ -244,13 +244,25 @@ function ResultDetailContent() {
                 accessibilityRole="button"
                 accessibilityLabel="Open PDF report"
                 disabled={!validReportUrl}
-                onPress={() => router.push({
-                  pathname: "/pdf-viewer",
-                  params: { uri: reportUrl, title: name || "Lab report" },
-                })}
-                style={[styles.pdfButton, { backgroundColor: colors.primary, opacity: validReportUrl ? 1 : 0.55 }]}
+                onPress={() =>
+                  router.push({
+                    pathname: "/pdf-viewer",
+                    params: { uri: reportUrl, title: name || "Lab report" },
+                  })
+                }
+                style={[
+                  styles.pdfButton,
+                  {
+                    backgroundColor: colors.primary,
+                    opacity: validReportUrl ? 1 : 0.55,
+                  },
+                ]}
               >
-                <Ionicons name="document-text-outline" size={18} color="#FFFFFF" />
+                <Ionicons
+                  name="document-text-outline"
+                  size={18}
+                  color="#FFFFFF"
+                />
                 <Text style={styles.pdfButtonText}>Open report PDF</Text>
                 <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
               </Pressable>
