@@ -9,7 +9,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-type OrderLine = { test_id?: number; testname?: string | { testname?: string }; amount?: number | string; status?: number; report_file?: string | null };
+type OrderLine = { test_id?: number; testname?: string | { testname?: string }; amount?: number | string; status?: number; report_file?: string | null; package_order_id?: number | null };
 type Order = {
   request_id?: number;
   order_reference?: string | null;
@@ -25,6 +25,7 @@ type Order = {
   referrer?: string | null;
   patient_name?: string | null;
   order_list?: OrderLine[];
+  packages?: { package_id: number; name: string; price: number; test_ids: number[] }[];
 };
 
 function OrderHistoryDetailContent() {
@@ -61,6 +62,19 @@ function OrderHistoryDetailContent() {
             <Text style={styles.heroDate}>{formattedDate}</Text>
           </View>
 
+          {Array.isArray(order.packages) && order.packages.length > 0 ? (
+            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.sectionTitle, { color: colors.navy }]}>Packages in this order</Text>
+              {order.packages.map((pkg, index) => (
+                <View key={`${pkg.package_id}-${index}`}>
+                  <SummaryRow label={pkg.name} value={naira(pkg.price)} colors={colors} />
+                  <Text style={[styles.notes, { color: colors.muted }]}>{pkg.test_ids.length} tests included</Text>
+                </View>
+              ))}
+              <Text style={[styles.notes, { color: colors.muted }]}>Included test amounts below are allocations of the package price, not additional charges.</Text>
+            </View>
+          ) : null}
+
           <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Text style={[styles.sectionTitle, { color: colors.navy }]}>Payment summary</Text>
             <SummaryRow label="Tests and packages" value={naira(order.subtotal)} colors={colors} />
@@ -80,7 +94,7 @@ function OrderHistoryDetailContent() {
               const hasReport = Boolean(line.report_file);
               return <View key={`${line.test_id ?? index}-${index}`} style={[styles.testRow, index > 0 && { borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
                 <View style={[styles.testIcon, { backgroundColor: colors.accent }]}><Ionicons name={hasReport ? 'document-text-outline' : 'flask-outline'} size={17} color={colors.primary} /></View>
-                <View style={styles.testCopy}><Text style={[styles.testName, { color: colors.navy }]}>{name}</Text><Text style={[styles.testStatus, { color: hasReport ? colors.success : colors.muted }]}>{hasReport ? 'Result available' : Number(line.status) === 2 ? 'In progress' : 'Awaiting processing'}</Text></View>
+                <View style={styles.testCopy}><Text style={[styles.testName, { color: colors.navy }]}>{name}</Text>{line.package_order_id != null ? <Text style={[styles.testStatus, { color: colors.muted }]}>Included in package</Text> : null}<Text style={[styles.testStatus, { color: hasReport ? colors.success : colors.muted }]}>{hasReport ? 'Result available' : Number(line.status) === 2 ? 'In progress' : 'Awaiting processing'}</Text></View>
                 <Text style={[styles.testAmount, { color: colors.navy }]}>{naira(line.amount)}</Text>
               </View>;
             }) : <Text style={[styles.emptyTests, { color: colors.muted }]}>Test details are not available for this order.</Text>}

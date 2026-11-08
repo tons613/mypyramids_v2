@@ -44,8 +44,13 @@ capped at three visible rows (with row heights adapting to text size). Tapping
 a package opens its description, price, image, and included tests; included tests
 link to their own details. Add to cart saves the package at its package price,
 with a separate package ID so it cannot collide with an individual test.
-Package payment remains unavailable because `/initialize_order` currently accepts
-test IDs only; the detail page explains this limitation.
+Package-only and mixed carts use `/initialize_order` with catalog IDs in
+`packagelist`; packages are not expanded into standalone tests. The backend
+confirms pricing and availability and rejects overlapping tests or packages.
+Each selection is limited to quantity one. Order details display snapshotted
+package prices and explain the included tests' accounting allocations.
+See [Health package ordering](./API_DOC.md#health-package-ordering)
+for the implemented contract and remaining quantity/refund restrictions.
 Pull down to refresh the catalog; test names and prices come from the API.
 
 The purple booking hero lives on guest Home, with a Browse tests action alongside

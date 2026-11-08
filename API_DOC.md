@@ -130,6 +130,108 @@ Response:
 
 The amount is whole naira in this API response; Paystack receives kobo. Open the returned authorization URL or use the access code with the Paystack SDK. The browser callback is not payment confirmation.
 
+### Health package ordering
+
+**Status: implemented in the backend and wired into the Expo checkout.**
+The backend deployment must apply `alembic upgrade head` before package orders
+are enabled; package purchases use separate immutable order snapshots.
+
+#### Catalog and cart
+
+- `/healthpackages` provides package `id`, `name`, `price`, `description`,
+  `subheading`, `image`, `test_count`, and included tests under
+  `test_list[].testdata`. The app displays this information and adds a package
+  as one cart item at its advertised package price.
+- `/initialize_order` accepts `testlist` and `packagelist`, allowing test-only,
+  package-only, and mixed orders. Either list may be omitted or empty, but at
+  least one selection is required. The app sends catalog package IDs separately
+  and no longer blocks package payment.
+- The app uses `package:<id>` as a **local cart key**, such as `package:1`, to
+  avoid collisions with test IDs. This is not a backend ID and must not be sent
+  in `testlist`.
+- Expanding packages into standalone test IDs on the client is not a valid
+  workaround: it loses package identity and charges individual `private_price`
+  values instead of the package price. In the sample catalog, Wellness
+  Essentials costs NGN 25,000, while its two included tests each display NGN
+  2,000. Neither the displayed test prices nor their sum determines the package
+  payment amount.
+- Quantity checkout remains unsupported. Each test ID and package ID may appear
+  once; the app blocks any item whose quantity is not one.
+
+#### Backward-compatible request
+
+`POST /initialize_order` accepts an optional `packagelist`. Existing test-only
+requests remain unchanged. A package-only request:
+
+```json
+{
+  "recipient": { "type": "self" },
+  "orderInfo": {
+    "service_type": "Visit to branch",
+    "clinicalinfo": "",
+    "address": "",
+    "addressLandmark": "",
+    "referrer": 0,
+    "referName": ""
+  },
+  "testlist": [],
+  "packagelist": [{ "id": 1 }],
+  "channels": ["card", "bank_transfer"]
+}
+```
+
+`packagelist[].id` is the catalog package ID, not a test ID or the local cart key.
+Each package/test ID may appear once; duplicates are rejected. The existing
+`self`, provider `existing`, and provider `new` recipient rules still apply.
+
+#### Implemented server behavior
+
+1. Packages must be active, have a positive whole-naira price, contain at least
+   one test, and contain only tests available in the app catalog. The server
+   resolves identity, prices, and membership; client prices/totals are ignored.
+2. Subtotal is standalone tests' server `private_price` values plus selected
+   package prices. Included tests are not charged again. Home-service charges
+   apply once per order.
+3. Package identity, name, price, and membership are snapshotted at initialization.
+   Included tests become ordinary reportable patient order details.
+   `order_list[].package_order_id` identifies their snapshot and is `null` for
+   standalone tests. Later catalog changes do not alter the initialized order.
+4. A package cannot be selected with one of its included tests, and selected
+   packages cannot share tests. Invalid or overlapping selections return HTTP
+   422 in the shared error envelope, identifying affected IDs. The app surfaces
+   the server validation error and preserves the cart for correction.
+5. Package prices are allocated equally among included tests in whole naira;
+   remainder naira are assigned in ascending test-ID order. Allocated
+   `order_list[].amount` values sum exactly to the package price and are not
+   extra charges. Partial refunds are not supported; allocated test amounts
+   must not be interpreted as individual refund entitlements.
+6. The existing payment response (`reference`, `authorization_url`,
+   `access_code`, whole-naira `amount`) is unchanged. Checkout uses the server
+   amount. Orders remain pending until the signed Paystack webhook verifies the
+   payment intent; repeated delivery does not duplicate orders or test details.
+7. `/get_orders_history` and `/get_my_patients` return a `packages` array on each
+   order containing `package_id`, snapshotted `name`, charged `price`, and
+   `test_ids`. The app displays these package purchases in order details and
+   preserves test-level report viewing.
+
+#### Acceptance checks
+
+- Package 1 alone initializes at NGN 25,000 (before any home-service charge) and
+  creates reportable details for tests 5000 and 5001 without charging them again.
+- Mixed non-overlapping carts use the sum of server test and package prices.
+  Test-only requests retain their current behavior.
+- Provider orders keep the selected patient as the recipient and the provider
+  as creator. Patients and providers can retrieve each included test's results.
+- Unknown packages, invalid prices, unavailable included tests, duplicate IDs,
+  empty selections, and overlapping tests return clear validation errors before
+  payment is initialized.
+- A package/catalog price or membership change after initialization does not
+  alter the stored payable amount or included tests. Duplicate payment webhook
+  delivery does not create duplicate records.
+- Client-local `package:1` is sent as `packagelist: [{"id":1}]`, never as a test
+  ID. No client expansion of package membership or client price is submitted.
+- Quantity greater than one and partial-refund handling remain unsupported.
+
 ### Initialize a wallet top-up
 
 `POST /initialize_wallet` requires authentication and an activated wallet:
@@ -175,7 +277,3 @@ These are operational endpoints and should be protected at the deployment layer 
 - `GET /admin/get_order_by_date`
 
 `POST /remote/postresult` stores the report URL in `order_details.report_file`; that URL appears in `/get_user_result` after upload.
-
-## Client payment rule
-
-After opening Paystack checkout, show payment as pending. Refresh the relevant order or wallet endpoint after the webhook has confirmed the payment. Do not infer success from a redirect alone and do not call the webhook from the client.

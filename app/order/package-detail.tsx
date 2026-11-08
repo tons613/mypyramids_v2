@@ -137,7 +137,7 @@ export default function PackageDetailScreen() {
             </View>
             <View style={[styles.notice, { backgroundColor: colors.accent }]}>
               <Ionicons name="information-circle-outline" size={21} color={colors.primary} />
-              <Text style={[styles.noticeText, { color: colors.navy }]}>You can save this package in your cart. Package payment is not available yet; checkout currently supports individual tests only.</Text>
+              <Text style={[styles.noticeText, { color: colors.navy }]}>The package price covers all included tests. Do not add those tests separately or select packages with overlapping tests. Final pricing and availability are confirmed at checkout.</Text>
             </View>
             {pkg.price === null ? <Text accessibilityRole="alert" style={[styles.body, { color: colors.muted }]}>This package cannot be added until its price is available.</Text> : null}
           </ScrollView>

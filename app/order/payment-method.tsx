@@ -76,17 +76,26 @@ function PaymentMethodContent() {
       Alert.alert('Recipient required', 'Go back to collection details and choose who this order is for.');
       return;
     }
-    if (items.some((item) => item.type === 'package')) {
-      Alert.alert('Package checkout unavailable', 'The order initialization contract currently accepts test IDs only. Remove the package from your cart or ask the backend team to add package support.');
-      return;
-    }
     if (items.some((item) => item.quantity !== 1)) {
-      Alert.alert('Quantity checkout unavailable', 'The order initialization contract accepts each test ID once and does not include a quantity field. Set each test quantity to one to continue.');
+      Alert.alert('Quantity checkout unavailable', 'Each test or package can be ordered once. Remove duplicate items and add each selection once to continue.');
       return;
     }
-    const testlist = items.map((item) => Number(item.id));
-    if (!testlist.length || testlist.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
-      Alert.alert('Invalid cart item', 'One or more test IDs are invalid. Remove them and add the tests again.');
+    const testlist: { id: number }[] = [];
+    const packagelist: { id: number }[] = [];
+    for (const item of items) {
+      const rawId = item.type === 'package' && item.id.startsWith('package:')
+        ? item.id.slice('package:'.length)
+        : item.id;
+      const id = Number(rawId);
+      const list = item.type === 'package' ? packagelist : testlist;
+      if (!/^\d+$/.test(rawId) || !Number.isSafeInteger(id) || id <= 0 || list.some((entry) => entry.id === id)) {
+        Alert.alert('Invalid cart item', 'A test or package ID is invalid or repeated. Remove the affected items and add them again.');
+        return;
+      }
+      list.push({ id });
+    }
+    if (!testlist.length && !packagelist.length) {
+      Alert.alert('Cart empty', 'Add a test or package before starting payment.');
       return;
     }
 
@@ -109,16 +118,19 @@ function PaymentMethodContent() {
           referrer: isProvider ? Number(user?.id) || 0 : 0,
           referName: isProvider ? [user?.firstname, user?.lastname].filter(Boolean).join(' ') : '',
         },
-        testlist: testlist.map((id) => ({ id })),
+        testlist,
+        ...(packagelist.length ? { packagelist } : {}),
         channels: [selectedChannel],
       }) as Record<string, unknown>;
 
       const serverAccessCode = typeof result?.access_code === 'string' ? result.access_code : '';
       const reference = typeof result?.reference === 'string' ? result.reference : '';
       if (!serverAccessCode || !reference) throw new Error('The server did not return a valid Paystack access code and reference.');
+      const serverAmount = Number(result.amount);
+      if (!Number.isSafeInteger(serverAmount) || serverAmount <= 0) throw new Error('The server did not return a valid payment amount.');
 
       setPaymentReference(reference);
-      setInitializedAmount(Number(result.amount) || amount);
+      setInitializedAmount(serverAmount);
       handledPaymentRef.current = false;
       setAccessCode(serverAccessCode);
     } catch (paymentError) {

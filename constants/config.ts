@@ -14,7 +14,7 @@ const ENV = {
     apiUrl: `http://${devHost}:8000`,
   },
   prod: {
-    apiUrl: "https://api.pyramidsdiagnostics.com",
+    apiUrl: "https://d80fc2f0dbf2-10172943863253630101.ngrok-free.app",
   },
 };
 

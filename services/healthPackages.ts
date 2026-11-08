@@ -61,7 +61,7 @@ export function readHealthPackages(payload: unknown): HealthPackage[] {
     return {
       id: pkg.id,
       name: pkg.name,
-      price: Number.isFinite(price) && price > 0 ? price : null,
+      price: Number.isSafeInteger(price) && price > 0 ? price : null,
       description: typeof pkg.description === 'string' ? pkg.description : '',
       subheading: typeof pkg.subheading === 'string' ? pkg.subheading : '',
       image: typeof pkg.image === 'string' ? pkg.image : '',

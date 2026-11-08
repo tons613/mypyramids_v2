@@ -113,6 +113,7 @@ export const orderService = {
       referName?: string;
     };
     testlist: { id: number }[];
+    packagelist?: { id: number }[];
     channels?: ("card" | "bank" | "ussd" | "bank_transfer")[];
   }) => {
     const response = await api.post("/initialize_order", data);
