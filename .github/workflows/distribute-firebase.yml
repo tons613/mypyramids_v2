@@ -1,7 +1,7 @@
 name: Distribute to Firebase
 
 on:
-  workflow_dispatch:  # Manual only
+  workflow_dispatch: # Manual only
 
 jobs:
   build-and-distribute:
@@ -15,7 +15,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -42,20 +42,35 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          while true; do
-            eas build:view $BUILD_ID --json > status.json
-            STATUS=$(jq -r '.status' status.json)
-            echo "Status: $STATUS"
+          echo "Waiting for build $BUILD_ID to finish..."
+
+          for i in {1..60}; do
+            STATUS=$(eas build:view "$BUILD_ID" --json | jq -r '.status')
+            echo "Attempt $i - Status: $STATUS"
 
             if [ "$STATUS" = "finished" ]; then
+              echo "✅ Build finished successfully"
               break
-            elif [ "$STATUS" = "errored" ] || [ "$STATUS" = "canceled" ]; then
+            fi
+
+            if [ "$STATUS" = "errored" ] || [ "$STATUS" = "canceled" ]; then
+              echo "❌ Build failed with status: $STATUS"
+              eas build:view "$BUILD_ID"
               exit 1
             fi
+
             sleep 30
           done
 
-          eas build:download $BUILD_ID --output ./app-release.apk
+          if [ "$STATUS" != "finished" ]; then
+            echo "❌ Timed out waiting for build"
+            exit 1
+          fi
+
+          echo "Downloading APK..."
+          eas build:download "$BUILD_ID" --output ./app-release.apk --force
+          ls -lh app-release.apk
+          echo "✅ APK downloaded successfully"
 
       - name: Upload to Firebase
         uses: wzieba/Firebase-Distribution-Github-Action@v1

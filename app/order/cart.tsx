@@ -42,7 +42,6 @@ export default function CartScreen() {
           ₦{item.price * item.quantity}
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center" }}>
-          {/* <Text variant="bodySmall">Qty: {item.quantity}</Text> */}
           <IconButton
             icon="delete"
             size={20}

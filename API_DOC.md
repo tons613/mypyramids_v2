@@ -155,8 +155,10 @@ are enabled; package purchases use separate immutable order snapshots.
   Essentials costs NGN 25,000, while its two included tests each display NGN
   2,000. Neither the displayed test prices nor their sum determines the package
   payment amount.
-- Quantity checkout remains unsupported. Each test ID and package ID may appear
-  once; the app blocks any item whose quantity is not one.
+- Each test ID and package ID is a single selection, not a quantity-based item.
+  Repeated Add to cart actions leave the cart unchanged. A compatibility guard
+  rejects older saved carts with repeated quantities and asks users to re-add
+  the affected selections.
 
 #### Backward-compatible request
 

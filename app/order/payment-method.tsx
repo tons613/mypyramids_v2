@@ -77,7 +77,7 @@ function PaymentMethodContent() {
       return;
     }
     if (items.some((item) => item.quantity !== 1)) {
-      Alert.alert('Quantity checkout unavailable', 'Each test or package can be ordered once. Remove duplicate items and add each selection once to continue.');
+      Alert.alert('Cart needs updating', 'Your saved cart contains repeated selections. Remove the affected items and add each test or package once to continue.');
       return;
     }
     const testlist: { id: number }[] = [];

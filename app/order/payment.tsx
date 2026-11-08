@@ -138,8 +138,7 @@ function PaymentContent() {
                   {item.name}
                 </Text>
                 <Text style={[styles.itemDetail, { color: colors.muted }]}>
-                  {item.type === "package" ? "Package" : "Test"} · Qty{" "}
-                  {item.quantity}
+                  {item.type === "package" ? "Package" : "Test"}
                 </Text>
               </View>
               <Text style={[styles.itemPrice, { color: colors.navy }]}>
