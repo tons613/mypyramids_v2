@@ -242,7 +242,7 @@ export default function HomeScreen() {
           contentContainerStyle={[styles.guestContent, { paddingBottom: Math.max(insets.bottom, 12) + 100 }]}
         >
           <Image
-            source={require("@/assets/images/logo.png")}
+            source={colorScheme === "dark" ? require("@/assets/images/logo-dark.png") : require("@/assets/images/logo.png")}
             style={styles.guestLogo}
             resizeMode="contain"
           />
@@ -337,7 +337,7 @@ export default function HomeScreen() {
         <View style={styles.header}>
           <View style={styles.brandRow}>
             <Image
-              source={require("@/assets/images/logo.png")}
+              source={colorScheme === "dark" ? require("@/assets/images/logo-dark.png") : require("@/assets/images/logo.png")}
               accessibilityLabel="Pyramids Diagnostic Services"
               resizeMode="contain"
               style={styles.dashboardLogo}

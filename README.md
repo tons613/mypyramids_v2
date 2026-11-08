@@ -58,6 +58,22 @@ The purple booking hero lives on guest Home, with a Browse tests action alongsid
 sign-in and registration options. Guest Home scrolls on smaller displays so
 these actions remain accessible.
 
+## Wallet top-ups
+
+Wallet top-ups initialize through authenticated `POST /initialize_wallet` with
+`{ amount, channels: [selectedMethod] }` in whole naira. Users select card,
+bank transfer, USSD, or bank account before initialization. The app resumes
+the returned Paystack access code. Wallet balances are refreshed from
+the backend after checkout, never credited locally from a checkout callback.
+
+Paying for orders from wallet balance is not enabled yet. See
+[Wallet-funded order backend requirements](./API_DOC.md#paying-for-orders-with-wallet-balance-backend-requirements)
+for the proposed contract, server-priced confirmation, atomic debit, idempotency,
+provider payer rules, ledger/results integration, and acceptance tests.
+The proposal also covers opt-in wallet + Paystack split payments, with reserved
+wallet funds, remainder-only Paystack initialization, and safe settlement,
+expiry, retry, and late-payment handling.
+
 ## Splash screen and cold start
 
 `assets/images/splash_screen.jpeg` is the launch artwork. It is configured in

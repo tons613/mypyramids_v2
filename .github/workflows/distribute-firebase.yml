@@ -78,7 +78,7 @@ jobs:
           echo "Downloading APK from: $BUILD_URL"
           curl -L "$BUILD_URL" -o app-release.apk
           ls -lh app-release.apk
-          echo "✅ APK downloaded successfully"
+          echo "✅ APK downloaded successfully."
 
       - name: Upload to Firebase
         uses: wzieba/Firebase-Distribution-Github-Action@v1

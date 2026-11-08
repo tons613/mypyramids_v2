@@ -165,6 +165,11 @@ export const paymentService = {
 };
 
 export const walletService = {
+  initializeTopup: async (amount: number, channel: "card" | "bank_transfer" | "ussd" | "bank") => {
+    const response = await api.post("/initialize_wallet", { amount, channels: [channel] });
+    return response.data;
+  },
+
   getCardDetails: async () => {
     const response = await api.get("/vcard/get_card_detail");
     return response.data;

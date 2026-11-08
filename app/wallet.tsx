@@ -1,27 +1,25 @@
 import { LoginRequiredGate } from '@/components/ui/LoginRequiredGate';
 import { Colors } from '@/constants/theme';
 import { naira } from '@/constants/format';
-import { PAYSTACK_PUBLIC_KEY } from '@/constants/payments';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { getApiErrorMessage } from '@/services/apiResponse';
 import { walletService } from '@/services/endpoints';
+import { paystackResumeHtml } from '@/services/paystackCheckout';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { Text } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { PaystackProvider, usePaystack } from 'react-native-paystack-webview';
-import { useSelector } from 'react-redux';
-import { RootState } from '@/store';
+import { WebView } from 'react-native-webview';
 
 const MIN_TOPUP_AMOUNT = 1000;
 const paymentMethods = [
-  { id: 'card', title: 'Debit or credit card', subtitle: 'Visa, Mastercard and Verve', icon: 'card-outline' as const },
-  { id: 'bank_transfer', title: 'Bank transfer', subtitle: 'Pay from your bank app', icon: 'swap-horizontal-outline' as const },
-  { id: 'ussd', title: 'USSD', subtitle: 'Pay with your bank USSD code', icon: 'phone-portrait-outline' as const },
-  { id: 'bank', title: 'Bank account', subtitle: 'Pay directly from your account', icon: 'business-outline' as const },
+  { id: 'card', title: 'Debit or credit card', subtitle: 'Visa, Mastercard and Verve', icon: 'card-outline' },
+  { id: 'bank_transfer', title: 'Bank transfer', subtitle: 'Pay from your bank app', icon: 'swap-horizontal-outline' },
+  { id: 'ussd', title: 'USSD', subtitle: 'Pay with your bank USSD code', icon: 'phone-portrait-outline' },
+  { id: 'bank', title: 'Bank account', subtitle: 'Pay directly from your account', icon: 'business-outline' },
 ] as const;
 type PaymentMethod = (typeof paymentMethods)[number]['id'];
 type WalletTransaction = {
@@ -79,12 +77,11 @@ function formatDate(date?: Date) {
   return date ? date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : 'Date unavailable';
 }
 
-function WalletContent({ selectedMethod, onSelectMethod }: { selectedMethod: PaymentMethod; onSelectMethod: (method: PaymentMethod) => void }) {
+function WalletContent() {
+  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('card');
   const router = useRouter();
-  const { popup } = usePaystack();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  const user = useSelector((state: RootState) => state.auth.user);
   const [wallet, setWallet] = useState<WalletCard | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -98,6 +95,10 @@ function WalletContent({ selectedMethod, onSelectMethod }: { selectedMethod: Pay
   const [topupAmount, setTopupAmount] = useState('');
   const [processingTopup, setProcessingTopup] = useState(false);
   const [checkingPayment, setCheckingPayment] = useState(false);
+  const [accessCode, setAccessCode] = useState<string | null>(null);
+  const topupIntent = useRef<{ amount: number; startingBalance: number } | null>(null);
+  const handledPayment = useRef(false);
+  const initializingPayment = useRef(false);
   const parsedTopupAmount = Number(topupAmount);
   const validTopupAmount = Number.isSafeInteger(parsedTopupAmount) && parsedTopupAmount >= MIN_TOPUP_AMOUNT;
 
@@ -126,7 +127,9 @@ function WalletContent({ selectedMethod, onSelectMethod }: { selectedMethod: Pay
     }
   }, []);
 
-  useEffect(() => { void loadWallet(); }, [loadWallet]);
+  useEffect(() => {
+    void Promise.resolve().then(() => loadWallet());
+  }, [loadWallet]);
 
   const activate = async () => {
     if (activating) return;
@@ -178,50 +181,73 @@ function WalletContent({ selectedMethod, onSelectMethod }: { selectedMethod: Pay
             return;
           }
         }
-      } catch {
-        // The signed Paystack webhook can take a moment to update the wallet.
+      } catch (e) {
+        setCheckingPayment(false);
+        Alert.alert('Unable to confirm wallet credit', getApiErrorMessage(e, 'Pull down to refresh your wallet shortly.'));
+        return;
       }
     }
     if (latest) setWallet(latest);
     setCheckingPayment(false);
-    Alert.alert('Payment received', 'Paystack completed the payment. Your wallet balance is still updating; pull down to refresh shortly.');
+    Alert.alert('Wallet credit pending', 'Checkout completed, but wallet credit has not been confirmed yet. Pull down to refresh shortly.');
   };
 
-  const startTopupPayment = () => {
-    const email = user?.email?.trim();
-    if (!wallet || wallet.walletId === null || !user?.id) {
+  const startTopupPayment = async () => {
+    if (initializingPayment.current || accessCode || checkingPayment) return;
+    if (!wallet || wallet.status !== 1) {
       Alert.alert('Wallet unavailable', 'Refresh or activate your wallet before continuing.');
       return;
     }
-    if (!email) {
-      Alert.alert('Email required', 'Add an email address to your account before making a wallet top-up.');
+    if (!validTopupAmount) {
+      Alert.alert('Invalid amount', 'Enter a whole naira amount of at least ₦1,000.');
       return;
     }
-    const amount = parsedTopupAmount;
-    const startingBalance = wallet.balance;
-    setMethodModalVisible(false);
+    initializingPayment.current = true;
     setProcessingTopup(true);
-    popup.checkout({
-      email,
-      amount,
-      metadata: { user_id: user.id, vcard_id: wallet.walletId },
-      onSuccess: () => {
-        setProcessingTopup(false);
-        setAmountModalVisible(false);
-        void refreshAfterTopup(startingBalance, amount);
-      },
-      onCancel: () => {
-        setProcessingTopup(false);
-        setMethodModalVisible(true);
-        Alert.alert('Payment cancelled', 'No wallet funds were added.');
-      },
-      onLoad: () => setProcessingTopup(false),
-      onError: (paymentError) => {
-        setProcessingTopup(false);
-        setMethodModalVisible(true);
-        Alert.alert('Payment failed', paymentError?.message || 'Paystack could not complete your payment. Please try again.');
-      },
-    });
+    try {
+      const result: unknown = await walletService.initializeTopup(parsedTopupAmount, selectedMethod);
+      const intent = unwrap(result);
+      const amount = Number(intent.amount);
+      if (typeof intent.access_code !== 'string' || !intent.access_code.trim() ||
+          typeof intent.reference !== 'string' || !intent.reference.trim() ||
+          !Number.isSafeInteger(amount) || amount < MIN_TOPUP_AMOUNT) {
+        throw new Error('The server did not return valid wallet payment details.');
+      }
+      topupIntent.current = { amount, startingBalance: wallet.balance };
+      handledPayment.current = false;
+      setMethodModalVisible(false);
+      setAccessCode(intent.access_code);
+    } catch (e) {
+      Alert.alert('Unable to start top-up', getApiErrorMessage(e, 'Please try again.'));
+    } finally {
+      initializingPayment.current = false;
+      setProcessingTopup(false);
+    }
+  };
+
+  const finishTopup = (event: { nativeEvent: { data: string } }) => {
+    let message: { event?: string; data?: { message?: string } };
+    try {
+      message = JSON.parse(event.nativeEvent.data);
+    } catch {
+      Alert.alert('Payment response invalid', 'Unable to read the checkout response. Refresh your wallet before trying again.');
+      return;
+    }
+    if (message.event === 'load' || handledPayment.current) return;
+    if (!['success', 'cancel', 'error'].includes(message.event ?? '')) {
+      Alert.alert('Payment response invalid', 'An unexpected checkout response was received.');
+      return;
+    }
+    handledPayment.current = true;
+    setAccessCode(null);
+    if (message.event === 'success' && topupIntent.current) {
+      const { amount, startingBalance } = topupIntent.current;
+      void refreshAfterTopup(startingBalance, amount);
+    } else {
+      setMethodModalVisible(true);
+      Alert.alert(message.event === 'cancel' ? 'Checkout cancelled' : 'Payment failed',
+        message.data?.message || 'Refresh your wallet before trying again if a debit occurred.');
+    }
   };
 
   const maskedNumber = wallet?.cardNo
@@ -275,7 +301,7 @@ function WalletContent({ selectedMethod, onSelectMethod }: { selectedMethod: Pay
 
         <View style={styles.quickHeading}><Text style={[styles.sectionTitle, { color: colors.navy }]}>Quick actions</Text></View>
         <View style={styles.actions}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Add funds to wallet" disabled={processingTopup || checkingPayment} onPress={openTopup} style={[styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, opacity: processingTopup || checkingPayment ? 0.6 : 1 }]}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Add funds to wallet" disabled={processingTopup || checkingPayment || !!accessCode} onPress={openTopup} style={[styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border, opacity: processingTopup || checkingPayment || accessCode ? 0.6 : 1 }]}>
             <View style={[styles.actionIcon, { backgroundColor: colors.accent }]}><Ionicons name="add-circle-outline" size={23} color={colors.primary} /></View><Text style={[styles.actionLabel, { color: colors.navy }]}>Add funds</Text>
           </Pressable>
           <Pressable onPress={() => router.push('/order/tests')} style={[styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -323,6 +349,22 @@ function WalletContent({ selectedMethod, onSelectMethod }: { selectedMethod: Pay
           </View>
         </View>
       </Modal>
+      <Modal visible={Boolean(accessCode)} animationType="slide" onRequestClose={() => finishTopup({ nativeEvent: { data: '{"event":"cancel"}' } })}>
+        <SafeAreaView style={[styles.screen, { backgroundColor: colors.card }]}>
+          <View style={styles.header}>
+            <Text style={[styles.title, { color: colors.navy }]}>Secure Paystack checkout</Text>
+            <Pressable accessibilityRole="button" accessibilityLabel="Close checkout" onPress={() => finishTopup({ nativeEvent: { data: '{"event":"cancel"}' } })}><Ionicons name="close" size={24} color={colors.primary} /></Pressable>
+          </View>
+          {accessCode ? <WebView
+            source={{ html: paystackResumeHtml(accessCode) }}
+            onMessage={finishTopup}
+            onError={() => finishTopup({ nativeEvent: { data: '{"event":"error","data":{"message":"Could not load Paystack checkout. Please try again."}}' } })}
+            javaScriptEnabled
+            domStorageEnabled
+            originWhitelist={['*']}
+          /> : null}
+        </SafeAreaView>
+      </Modal>
 
       <Modal visible={methodModalVisible} transparent animationType="fade" onRequestClose={() => { setMethodModalVisible(false); setAmountModalVisible(true); }}>
         <View style={styles.modalBackdrop}>
@@ -335,11 +377,13 @@ function WalletContent({ selectedMethod, onSelectMethod }: { selectedMethod: Pay
             <Text style={[styles.modalDescription, { color: colors.muted }]}>Choose how you’d like to add {naira(parsedTopupAmount)}.</Text>
             <View style={styles.paymentMethodList}>{paymentMethods.map((method) => {
               const selected = selectedMethod === method.id;
-              return <Pressable key={method.id} accessibilityRole="radio" accessibilityState={{ checked: selected }} onPress={() => onSelectMethod(method.id)} style={[styles.paymentMethodRow, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.lavender : colors.card }]}>
-                <View style={[styles.actionIcon, { backgroundColor: colors.accent }]}><Ionicons name={method.icon} size={20} color={colors.primary} /></View>
-                <View style={styles.paymentMethodCopy}><Text style={[styles.paymentMethodTitle, { color: colors.navy }]}>{method.title}</Text><Text style={[styles.paymentMethodSubtitle, { color: colors.muted }]}>{method.subtitle}</Text></View>
-                <View style={[styles.radioOuter, { borderColor: selected ? colors.primary : colors.border }]}>{selected ? <View style={[styles.radioInner, { backgroundColor: colors.primary }]} /> : null}</View>
-              </Pressable>;
+              return (
+                <Pressable key={method.id} accessibilityRole="radio" accessibilityState={{ checked: selected, disabled: processingTopup }} disabled={processingTopup} onPress={() => setSelectedMethod(method.id)} style={[styles.paymentMethodRow, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.lavender : colors.card }]}>
+                  <View style={[styles.actionIcon, { backgroundColor: colors.accent }]}><Ionicons name={method.icon} size={20} color={colors.primary} /></View>
+                  <View style={styles.paymentMethodCopy}><Text style={[styles.paymentMethodTitle, { color: colors.navy }]}>{method.title}</Text><Text style={[styles.paymentMethodSubtitle, { color: colors.muted }]}>{method.subtitle}</Text></View>
+                  <View style={[styles.radioOuter, { borderColor: selected ? colors.primary : colors.border }]}>{selected ? <View style={[styles.radioInner, { backgroundColor: colors.primary }]} /> : null}</View>
+                </Pressable>
+              );
             })}</View>
             <View style={[styles.secureNotice, { backgroundColor: colors.accent }]}><Ionicons name="lock-closed-outline" size={15} color={colors.primary} /><Text style={[styles.secureNoticeText, { color: colors.navy }]}>Payment is securely handled by Paystack.</Text></View>
             <Pressable accessibilityRole="button" disabled={processingTopup} onPress={startTopupPayment} style={[styles.modalPrimaryButton, { backgroundColor: colors.primary, opacity: processingTopup ? 0.65 : 1 }]}>{processingTopup ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="lock-closed-outline" size={17} color="#FFFFFF" />}<Text style={styles.modalPrimaryText}>{processingTopup ? 'Opening Paystack…' : `Pay ${naira(parsedTopupAmount)}`}</Text></Pressable>
@@ -351,9 +395,7 @@ function WalletContent({ selectedMethod, onSelectMethod }: { selectedMethod: Pay
 }
 
 export default function WalletScreen() {
-  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('card');
-  const channels = useMemo(() => [selectedMethod], [selectedMethod]);
-  return <LoginRequiredGate><PaystackProvider publicKey={PAYSTACK_PUBLIC_KEY} defaultChannels={channels}><WalletContent selectedMethod={selectedMethod} onSelectMethod={setSelectedMethod} /></PaystackProvider></LoginRequiredGate>;
+  return <LoginRequiredGate><WalletContent /></LoginRequiredGate>;
 }
 
 const styles = StyleSheet.create({
