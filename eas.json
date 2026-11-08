@@ -9,10 +9,25 @@
       "distribution": "internal"
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EAS_USE_CACHE": "1"
+      },
+      "cache": {
+        "disabled": false,
+        "key": "preview-cache",
+        "paths": ["android", "ios"]
+      }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EAS_USE_CACHE": "1"
+      },
+      "cache": {
+        "disabled": false,
+        "key": "production-cache"
+      }
     }
   },
   "submit": {

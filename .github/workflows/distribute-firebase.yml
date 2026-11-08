@@ -44,8 +44,9 @@ jobs:
         run: |
           echo "Waiting for build $BUILD_ID to finish..."
 
-          for i in {1..60}; do
-            STATUS=$(eas build:view "$BUILD_ID" --json | jq -r '.status')
+          for i in {1..80}; do
+            # Get status and force lowercase
+            STATUS=$(eas build:view "$BUILD_ID" --json | jq -r '.status' | tr '[:upper:]' '[:lower:]')
             echo "Attempt $i - Status: $STATUS"
 
             if [ "$STATUS" = "finished" ]; then
@@ -59,7 +60,7 @@ jobs:
               exit 1
             fi
 
-            sleep 30
+            sleep 20
           done
 
           if [ "$STATUS" != "finished" ]; then
